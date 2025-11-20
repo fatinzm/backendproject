@@ -1,59 +1,52 @@
+# yt_video_fetcher.py
 import os
 import subprocess
-import glob
+from typing import List
 from fastapi import HTTPException
 
+DOWNLOAD_DIR = "downloads"
 
-def download_latest_tiktok_videos(username: str, output_dir: str = "downloads"):
+
+def fetch_and_download_tiktok_videos(username: str) -> List[str]:
     """
-    Download up to 5 latest TikTok videos for a profile using yt-dlp only.
-    Raises HTTPException with readable error if yt-dlp fails.
+    Downloads up to 2 recent TikTok videos for a given username using yt-dlp
+    and returns the local file paths.
     """
-    os.makedirs(output_dir, exist_ok=True)
 
-    # Remove old videos for this user
-    for old_file in glob.glob(os.path.join(output_dir, f"{username}_video_*.mp4")):
-        try:
-            os.remove(old_file)
-        except OSError:
-            pass
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required")
 
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    # Very simple approach: pass the profile URL to yt-dlp
     profile_url = f"https://www.tiktok.com/@{username}"
 
-    tmp_pattern = os.path.join(output_dir, f"{username}_%(id)s.%(ext)s")
-
     cmd = [
-        "python", "-m", "yt_dlp",        # use the module explicitly
-        "--no-playlist",
-        "--max-downloads", "5",
-        "-o", tmp_pattern,
+        "yt-dlp",
         profile_url,
+        "-o",
+        os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
+        "--max-downloads",
+        "2",
+        "--no-playlist",
     ]
 
-    try:
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except FileNotFoundError:
-        # python not found / weird env
-        raise HTTPException(
-            status_code=500,
-            detail="yt-dlp not available in the runtime environment.",
-        )
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        # Bubble up the real yt-dlp error message
         raise HTTPException(
             status_code=500,
-            detail=f"yt-dlp failed (code {result.returncode}): {result.stderr.strip()}",
+            detail=f"yt-dlp failed (code {result.returncode}): {result.stderr}",
         )
 
-    # Rename to pattern expected by main.py
-    downloaded = sorted(glob.glob(os.path.join(output_dir, f"{username}_*.mp4")))
-    for idx, path in enumerate(downloaded[:5]):
-        new_path = os.path.join(output_dir, f"{username}_video_{idx}.mp4")
-        if path != new_path:
-            os.replace(path, new_path)
+    # Collect downloaded files
+    files = [
+        os.path.join(DOWNLOAD_DIR, f)
+        for f in os.listdir(DOWNLOAD_DIR)
+        if os.path.isfile(os.path.join(DOWNLOAD_DIR, f))
+    ]
+
+    if not files:
+        raise HTTPException(status_code=404, detail="No videos downloaded")
+
+    return files

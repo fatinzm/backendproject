@@ -1,52 +1,50 @@
-# yt_video_fetcher.py
 import os
 import subprocess
-from typing import List
-from fastapi import HTTPException
+from pathlib import Path
 
-DOWNLOAD_DIR = "downloads"
+YTDLP_CMD_BASE = [
+    "yt-dlp",
+    "--no-warnings",
+    "--no-progress",
+    "--force-ipv4",
+    "--extractor-args", "tiktok:player_client=web",  # important for TikTok
+]
 
-
-def fetch_and_download_tiktok_videos(username: str) -> List[str]:
-    """
-    Downloads up to 2 recent TikTok videos for a given username using yt-dlp
-    and returns the local file paths.
-    """
-
-    if not username:
-        raise HTTPException(status_code=400, detail="Username is required")
-
-    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-    # Very simple approach: pass the profile URL to yt-dlp
+def download_from_tiktok_profile(username: str, output_dir: Path) -> list[Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    # download last 2 videos from profile
     profile_url = f"https://www.tiktok.com/@{username}"
 
+    outtmpl = str(output_dir / "%(id)s.%(ext)s")
+
     cmd = [
-        "yt-dlp",
+        *YTDLP_CMD_BASE,
+        "-o", outtmpl,
+        "--max-downloads", "2",
         profile_url,
-        "-o",
-        os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
-        "--max-downloads",
-        "2",
-        "--no-playlist",
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
 
-    if result.returncode != 0:
-        raise HTTPException(
-            status_code=500,
-            detail=f"yt-dlp failed (code {result.returncode}): {result.stderr}",
-        )
+    if proc.returncode != 0:
+        # LOG to server logs
+        print("yt-dlp FAILED ---------------------------------")
+        print("RETURN CODE:", proc.returncode)
+        print("STDERR:\n", proc.stderr)
+        print("STDOUT:\n", proc.stdout)
+        print("-----------------------------------------------")
 
-    # Collect downloaded files
-    files = [
-        os.path.join(DOWNLOAD_DIR, f)
-        for f in os.listdir(DOWNLOAD_DIR)
-        if os.path.isfile(os.path.join(DOWNLOAD_DIR, f))
-    ]
+        error_output = (proc.stderr or "") + "\n\nSTDOUT:\n" + (proc.stdout or "")
+        raise RuntimeError(f"yt-dlp failed (code {proc.returncode}): {error_output}")
 
-    if not files:
-        raise HTTPException(status_code=404, detail="No videos downloaded")
+    files = []
+    for name in os.listdir(output_dir):
+        if name.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
+            files.append(output_dir / name)
 
     return files

@@ -4,7 +4,9 @@ pydantic
 python-multipart
 httpx
 yt-dlp[default,curl-cffi]
+curl_cffi[impersonate]>=0.6.2
 brotli
 pycryptodomex
+
 
 
